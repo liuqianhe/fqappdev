@@ -15,6 +15,7 @@ import '../services/chapter_text_formatter.dart';
 import '../services/library_store.dart';
 import '../services/listening_session.dart';
 import '../services/reader_device.dart';
+import '../services/volume_key.dart';
 import '../services/reader_history.dart';
 import '../services/reader_preferences.dart';
 import '../services/reader_underline_store.dart';
@@ -137,30 +138,32 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       ? ReaderThemePreset.eink
       : _preferences.themePreset;
 
-  bool _handleVolumeKey(KeyEvent event) {
+  /// 原生层（MainActivity.dispatchKeyEvent）拦截到音量键后回调：仅在阅读页
+  /// 当前路由、未显示控制栏、已开启音量键翻页、且为分页模式时翻页。
+  void _onVolumeKey(int direction) {
     if (!mounted ||
-        !_appActive ||
-        ModalRoute.of(context)?.isCurrent != true ||
+        !_routeCurrent ||
+        _controlsVisible ||
         !_preferences.volumeKeyTurn ||
-        _controlsVisible) {
-      return false;
+        !_paged) {
+      return;
     }
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
-    if (_paged) {
-      if (event.logicalKey == LogicalKeyboardKey.audioVolumeDown) {
-        _pauseListenFollow();
-        _stopAutoTurn();
-        unawaited(_turnPage(1));
-        return true;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.audioVolumeUp) {
-        _pauseListenFollow();
-        _stopAutoTurn();
-        unawaited(_turnPage(-1));
-        return true;
-      }
-    }
-    return false;
+    _pauseListenFollow();
+    _stopAutoTurn();
+    unawaited(_turnPage(direction));
+  }
+
+  /// 根据当前状态同步原生是否拦截音量键：仅当阅读页是当前路由、未显示控制栏、
+  /// 已开启音量键翻页、且为分页模式时启用。其余情况放行系统音量。
+  void _syncVolumeKeyEnabled() {
+    unawaited(
+      VolumeKeyService.instance.setEnabled(
+        _routeCurrent &&
+            _preferences.volumeKeyTurn &&
+            !_controlsVisible &&
+            _paged,
+      ),
+    );
   }
 
   void _toggleAutoTurn() {
@@ -361,7 +364,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    HardwareKeyboard.instance.addHandler(_handleVolumeKey);
+    VolumeKeyService.instance.setOnVolumeKey(_onVolumeKey);
+    _syncVolumeKeyEnabled();
     ListeningSession.instance.addListener(_onListeningTick);
     WidgetsBinding.instance.addObserver(this);
     _appActive =
@@ -390,6 +394,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (_routeCurrent == current) return;
     _routeCurrent = current;
     _syncSystemBars();
+    _syncVolumeKeyEnabled();
   }
 
   // Note: Route/lifecycle ownership and SDK 36 compatibility; see
@@ -417,6 +422,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _dayTheme = preferences.themePreset;
       }
     });
+    _syncVolumeKeyEnabled();
     await _loadFont(preferences.fontPath);
     if (mounted && _appActive) unawaited(_refreshDevice());
   }
@@ -921,7 +927,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     _chapterRequest?.cancel();
-    HardwareKeyboard.instance.removeHandler(_handleVolumeKey);
+    VolumeKeyService.instance.setOnVolumeKey(null);
+    unawaited(VolumeKeyService.instance.setEnabled(false));
     ListeningSession.instance.removeListener(_onListeningTick);
     _autoTurnTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -963,6 +970,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         }
       }
     }
+    // 前台/后台切换不影响原生层音量键拦截（在 Activity 层，与 Flutter 生命周期
+    // 无关），故此处无需重挂监听；仅同步一次状态即可。
+    _syncVolumeKeyEnabled();
   }
 
   Future<void> _load({
@@ -1730,6 +1740,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
     }
     setState(() => _controlsVisible = !_controlsVisible);
+    _syncVolumeKeyEnabled();
   }
 
   void _previewPreferences(ReaderPreferences preferences) {
