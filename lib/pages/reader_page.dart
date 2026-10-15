@@ -15,6 +15,7 @@ import '../services/chapter_text_formatter.dart';
 import '../services/library_store.dart';
 import '../services/listening_session.dart';
 import '../services/reader_device.dart';
+import '../services/eink_refresh.dart';
 import '../services/reader_history.dart';
 import '../services/reader_preferences.dart';
 import '../services/reader_underline_store.dart';
@@ -137,6 +138,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       ? ReaderThemePreset.eink
       : _preferences.themePreset;
 
+  /// 排版用的偏好：墨水屏模式下把预设换成 eink，正文/标题才是 #000000。
+  ///
+  /// 页面背景早就走 [_effectivePreset]，但 [ReaderLayoutSpec] 的正文、标题
+  /// 颜色和 [ReaderControls] 自己的读色都取自这里传入的 preferences。之前
+  /// 两处直接传 [_preferences]，于是全局墨水屏开启后正文仍用用户保存预设的
+  /// textColor（默认米白 #292724）——实测设备上正文主色 RGB(41,39,36)，
+  /// 墨水屏把它量化成明显发灰的一档。保存的预设不动，关闭墨水屏即恢复。
+  ReaderPreferences get _displayPreferences => einkModeNotifier.value
+      ? _preferences.copyWith(themePreset: ReaderThemePreset.eink)
+      : _preferences;
+
   bool _handleVolumeKey(KeyEvent event) {
     if (!mounted ||
         !_appActive ||
@@ -252,6 +264,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   bool _appActive = true;
   bool _routeCurrent = false;
   bool _changingChapter = false;
+
+  /// 墨水屏整屏刷新计数器：每翻一页 +1，达到 [_ReaderState._einkRefreshInterval]
+  /// 阈值（来自 [_preferences.einkRefreshInterval]）就调用一次海信 EPD 全刷压残影，
+  /// 然后归零。仅在全局墨水屏模式开启时累加。
+  int _einkPageCounter = 0;
 
   /// Chapter-boundary transition handed to [ReaderPagedView]; see
   /// [ReaderChapterTurn]. Set by [_next] / [_prev] and cleared once the slide
@@ -1403,7 +1420,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final spec = ReaderLayoutSpec(
       viewport: constraints.biggest,
       textScaler: MediaQuery.textScalerOf(context),
-      preferences: _preferences,
+      preferences: _displayPreferences,
       fontFamily:
           _fontFamily ?? Theme.of(context).textTheme.bodyLarge?.fontFamily,
     );
@@ -1531,6 +1548,21 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
     _settleReadTime();
     unawaited(_persistProgress());
+    // 分页模式的实际翻页：累加墨水屏刷新计数（覆盖音量键/自动翻页/点按翻页）。
+    _recordEinkPageTurn();
+  }
+
+  /// 墨水屏整屏刷新：翻够 [_preferences.einkRefreshInterval] 页触发一次海信 EPD
+  /// 全刷压残影。全局墨水屏未开或间隔为 0 时直接跳过，计数不累加。
+  void _recordEinkPageTurn() {
+    if (!einkModeNotifier.value) return;
+    final interval = _preferences.einkRefreshInterval;
+    if (interval <= 0) return;
+    _einkPageCounter++;
+    if (_einkPageCounter >= interval) {
+      _einkPageCounter = 0;
+      unawaited(EinkRefreshService.instance.refreshIfSupported());
+    }
   }
 
   Future<void> _pageBoundary(int direction) async {
@@ -1698,6 +1730,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       await _pagedKey.currentState?.turnPage(direction);
       return;
     }
+    // 滚动模式的离散翻页（音量键/点按边缘/自动翻页）记一次，连续拖拽不计入。
+    _recordEinkPageTurn();
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
     const boundaryTolerance = 2.0;
@@ -1735,11 +1769,15 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   void _previewPreferences(ReaderPreferences preferences) {
     _preferencesDirty = true;
     final fontChanged = preferences.fontPath != _preferences.fontPath;
+    final intervalChanged =
+        preferences.einkRefreshInterval != _preferences.einkRefreshInterval;
     setState(() {
       _preferences = preferences.normalized();
       if (_preferences.themePreset != ReaderThemePreset.dark) {
         _dayTheme = _preferences.themePreset;
       }
+      // 刷新间隔改变时清零计数，避免沿用旧阈值导致久不刷新或立刻刷新。
+      if (intervalChanged) _einkPageCounter = 0;
     });
     if (fontChanged) unawaited(_loadFont(preferences.fontPath));
   }
@@ -2721,7 +2759,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final previewIndex = seekValue.round().clamp(0, widget.chapters.length - 1);
     return ReaderControls(
       key: const ValueKey('reader-controls'),
-      preferences: _preferences,
+      preferences: _displayPreferences,
       chapterIndex: previewIndex,
       chapterCount: widget.chapters.length,
       chapterTitle: widget.chapters[previewIndex].title,

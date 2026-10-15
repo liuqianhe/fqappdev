@@ -43,6 +43,7 @@ class ReaderPreferences {
   static const _autoTurnSecondsKey = 'reader_auto_turn_seconds';
   static const _listeningFollowKey = 'reader_listening_follow';
   static const _continuousReadingKey = 'reader_continuous_reading';
+  static const _einkRefreshIntervalKey = 'reader_eink_refresh_interval';
 
   final double fontSize;
   final int fontWeight;
@@ -74,6 +75,10 @@ class ReaderPreferences {
   /// 普通分页始终直接跨章，不受这个滚动手势开关影响。
   final bool continuousReading;
 
+  /// 墨水屏整屏刷新间隔（页）：翻够这么多页调用一次厂商 EPD 全刷压残影。
+  /// 0 表示关闭。默认 10 页，只在设备提供海信 EPD 接口时才会真正触发。
+  final int einkRefreshInterval;
+
   const ReaderPreferences({
     this.fontSize = 18,
     this.fontWeight = 400,
@@ -98,6 +103,7 @@ class ReaderPreferences {
     this.autoTurnSeconds = 10,
     this.listeningFollow = true,
     this.continuousReading = true,
+    this.einkRefreshInterval = 10,
   }) : readingInfoMode = showReadingInfo == false
            ? ReaderInfoMode.hidden
            : readingInfoMode;
@@ -126,6 +132,7 @@ class ReaderPreferences {
     int? autoTurnSeconds,
     bool? listeningFollow,
     bool? continuousReading,
+    int? einkRefreshInterval,
   }) {
     return ReaderPreferences(
       fontSize: fontSize ?? this.fontSize,
@@ -157,6 +164,8 @@ class ReaderPreferences {
       autoTurnSeconds: autoTurnSeconds ?? this.autoTurnSeconds,
       listeningFollow: listeningFollow ?? this.listeningFollow,
       continuousReading: continuousReading ?? this.continuousReading,
+      einkRefreshInterval:
+          einkRefreshInterval ?? this.einkRefreshInterval,
     ).normalized();
   }
 
@@ -194,6 +203,7 @@ class ReaderPreferences {
           : 10,
       listeningFollow: listeningFollow,
       continuousReading: continuousReading,
+      einkRefreshInterval: einkRefreshInterval.clamp(0, 100),
     );
   }
 
@@ -247,6 +257,8 @@ class ReaderPreferences {
           .clamp(3, 60),
       listeningFollow: _boolean(preferences, _listeningFollowKey) ?? true,
       continuousReading: _boolean(preferences, _continuousReadingKey) ?? true,
+      einkRefreshInterval:
+          (_number(preferences, _einkRefreshIntervalKey) ?? 10).round(),
     ).normalized();
   }
 
@@ -291,6 +303,10 @@ class ReaderPreferences {
       preferences.setInt(_autoTurnSecondsKey, value.autoTurnSeconds),
       preferences.setBool(_listeningFollowKey, value.listeningFollow),
       preferences.setBool(_continuousReadingKey, value.continuousReading),
+      preferences.setInt(
+        _einkRefreshIntervalKey,
+        value.einkRefreshInterval,
+      ),
     ]);
   }
 
