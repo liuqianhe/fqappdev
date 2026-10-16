@@ -2325,7 +2325,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               _toggleControls();
             } else if (details.localPosition.dx < constraints.maxWidth / 3) {
               _pauseListenFollow();
-              _turnPage(-1);
+              _turnPage(_preferences.tapLeftTurnsNext ? 1 : -1);
             } else if (details.localPosition.dx >
                 constraints.maxWidth * 2 / 3) {
               _pauseListenFollow();
@@ -2348,7 +2348,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                         onPageChanged: _onPageChanged,
                         onBoundary: _pageBoundary,
                         onDragStart: _hideControlsOnDrag,
-                        turnStyle: _preferences.pageTurnStyle,
+                        instantSwipe: _preferences.instantSwipeTurn,
+                        turnStyle: _preferences.instantSwipeTurn
+                            ? ReaderPageTurnStyle.none
+                            : _preferences.pageTurnStyle,
                         backgroundColor: preset.backgroundColor,
                         endPage: _index == widget.chapters.length - 1
                             ? _buildChapterEndPage(preset)
