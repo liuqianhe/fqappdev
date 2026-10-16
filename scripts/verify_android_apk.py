@@ -218,12 +218,15 @@ def run_logged(command: list[str], report_dir: Path, log_name: str,
         raise VerificationError(f"Cannot run verification command; see {log_name}") from error
     write_text(report_dir, log_name, result.stdout)
     # A tolerated exit code is recorded in the log rather than hidden, so the
-    # report still shows what the tool actually said about the package.
+    # report still shows what the tool actually said about the package. The
+    # output is returned even for a tolerated code: callers that distinguish
+    # "unsigned" from "tool failed" need the actual output, not an empty
+    # string that erases the difference.
     if result.returncode != 0:
         if result.returncode in allowed_returncodes:
             write_text(report_dir, log_name,
                        result.stdout + f"\nAllowed exit code {result.returncode}.\n")
-            return ""
+            return result.stdout
         raise VerificationError(f"Verification command exited with {result.returncode}; see {log_name}")
     return result.stdout
 
@@ -256,11 +259,30 @@ def certificate_digests(output: str) -> list[str]:
     return digests
 
 
+# Phrases apksigner prints for a package with no signature at all. An
+# unsigned-tolerant check must see one of these (and no signer certificate)
+# before reporting "unsigned": apksigner also exits 1 for a broken signature
+# and for tool failures, and none of those may be mistaken for "unsigned".
+UNSIGNED_SIGNATURE_MARKERS = (
+    "number of signers: 0",
+    "not signed",
+    "no signature",
+)
+
+
 def sha256_argument(value: str) -> str:
     digest = value.strip().replace(":", "").lower()
     if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
         raise argparse.ArgumentTypeError("Expected a 64-digit SHA-256 certificate digest")
     return digest
+
+
+def version_name_argument(value: str) -> str:
+    version = value.strip()
+    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+        raise argparse.ArgumentTypeError(
+            "Expected a semver triple such as 1.2.3 (the APK versionName, without a build number)")
+    return version
 
 
 def verify(args: argparse.Namespace, report_dir: Path, report: dict) -> None:
@@ -305,11 +327,31 @@ def verify(args: argparse.Namespace, report_dir: Path, report: dict) -> None:
     # exits non-zero on such a package. That is an expected outcome rather than
     # a defect when the caller asks for an unsigned-tolerant verification, so
     # the signature block is reported as absent instead of aborting the run.
+    # But apksigner also exits non-zero for a broken signature and for tool
+    # failures (empty output, unparseable output), and those must not be
+    # mistaken for "unsigned": the output must positively establish that the
+    # package has no signature.
     if args.allow_unsigned:
         signature = run_logged([java, "-jar", str(signer), "verify", "--verbose",
                                 "--print-certs", str(apk)], report_dir, "apksigner.log",
                                allowed_returncodes=(1,))
-        signer_digests = [] if not signature else certificate_digests(signature)
+        if not signature.strip():
+            raise VerificationError(
+                "apksigner produced no output for an unsigned-tolerant check; "
+                "cannot distinguish an unsigned APK from a tool failure (see apksigner.log)")
+        try:
+            signer_digests = certificate_digests(signature)
+        except VerificationError:
+            signer_digests = []
+        lowered = signature.lower()
+        if signer_digests and "does not verify" in lowered:
+            raise VerificationError(
+                "APK carries a signing certificate but apksigner did not verify it; "
+                "the signature is broken, not absent (see apksigner.log)")
+        if not signer_digests and not any(marker in lowered for marker in UNSIGNED_SIGNATURE_MARKERS):
+            raise VerificationError(
+                "apksigner output establishes neither a signature nor an unsigned "
+                "package; refusing to treat it as unsigned (see apksigner.log)")
     else:
         signature = run_logged([java, "-jar", str(signer), "verify", "--verbose",
                                 "--print-certs", str(apk)], report_dir, "apksigner.log")
@@ -330,6 +372,13 @@ def verify(args: argparse.Namespace, report_dir: Path, report: dict) -> None:
     badging = run_logged([aapt, "dump", "badging", str(apk)], report_dir, "aapt-badging.log")
     report["application"] = application_metadata(badging)
     report["checks"]["application_metadata"] = "passed"
+    if args.expected_version_name is not None:
+        report["application"]["expected_version_name"] = args.expected_version_name
+        if report["application"]["version_name"] != args.expected_version_name:
+            raise VerificationError(
+                f"APK versionName {report['application']['version_name']!r} does not match "
+                f"the expected version {args.expected_version_name!r}; the tag and pubspec disagree")
+        report["checks"]["expected_version_name"] = "passed"
 
     if apk.stat().st_size != size or sha256_file(apk) != digest:
         raise VerificationError("APK changed during verification; results cannot be trusted")
@@ -344,6 +393,10 @@ def main() -> int:
     parser.add_argument("--report-dir", required=True, help="Directory for verification logs, JSON, and extracted libraries")
     parser.add_argument("--expected-signer-sha256", type=sha256_argument,
                         help="Require the APK's sole signing certificate to have this SHA-256 digest")
+    parser.add_argument("--expected-version-name", type=version_name_argument,
+                        help=("Require the APK versionName to equal this semver triple, e.g. 1.2.3. "
+                              "Tag builds pass the tag name with the leading v stripped; "
+                              "branch and PR builds omit it and skip the assertion."))
     parser.add_argument("--allow-unsigned", action="store_true",
                         help=("Accept a package with no signature and report it as unsigned. "
                               "Every other check still runs. Use only where the release keystore "
