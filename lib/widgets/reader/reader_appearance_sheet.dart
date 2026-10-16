@@ -338,6 +338,24 @@ class _ReaderAppearanceSheetState extends State<ReaderAppearanceSheet> {
                             ),
                           ),
                         ),
+                        _toggle(
+                          '滑动直翻（无过渡动画）',
+                          subtitle:
+                              '分页模式：滑动越过阈值直接翻页，不显示翻页过渡与动画；开启后翻页方式强制为“无”。适合墨水屏',
+                          value: _value.instantSwipeTurn,
+                          onChanged: (value) => _update(
+                            _value.copyWith(instantSwipeTurn: value),
+                          ),
+                        ),
+                        _toggle(
+                          '点击左侧翻右',
+                          subtitle:
+                              '点击屏幕左三分之一也翻到下一页（左、右两侧均翻下一页），单手 / 墨水屏更顺手',
+                          value: _value.tapLeftTurnsNext,
+                          onChanged: (value) => _update(
+                            _value.copyWith(tapLeftTurnsNext: value),
+                          ),
+                        ),
                         _row(
                           label: '自动翻页',
                           child: Expanded(

@@ -44,6 +44,8 @@ class ReaderPreferences {
   static const _listeningFollowKey = 'reader_listening_follow';
   static const _continuousReadingKey = 'reader_continuous_reading';
   static const _einkRefreshIntervalKey = 'reader_eink_refresh_interval';
+  static const _instantSwipeTurnKey = 'reader_instant_swipe_turn';
+  static const _tapLeftTurnsNextKey = 'reader_tap_left_turns_next';
 
   final double fontSize;
   final int fontWeight;
@@ -79,6 +81,14 @@ class ReaderPreferences {
   /// 0 表示关闭。默认 10 页，只在设备提供海信 EPD 接口时才会真正触发。
   final int einkRefreshInterval;
 
+  /// 分页模式“滑动直翻”：滑动越过阈值直接翻页，不显示翻页过渡页面与动画。
+  /// 适合墨水屏（翻页动画/残影明显）。仅分页模式生效，开启后翻页方式被强制为“无”。
+  final bool instantSwipeTurn;
+
+  /// “点击左侧翻右”：开启后点击屏幕左三分之一也翻到下一页（与右侧一致），
+  /// 失去“点击左侧返回上一页”。适合单手 / 墨水屏操作。
+  final bool tapLeftTurnsNext;
+
   const ReaderPreferences({
     this.fontSize = 18,
     this.fontWeight = 400,
@@ -104,6 +114,8 @@ class ReaderPreferences {
     this.listeningFollow = true,
     this.continuousReading = true,
     this.einkRefreshInterval = 10,
+    this.instantSwipeTurn = false,
+    this.tapLeftTurnsNext = false,
   }) : readingInfoMode = showReadingInfo == false
            ? ReaderInfoMode.hidden
            : readingInfoMode;
@@ -133,6 +145,8 @@ class ReaderPreferences {
     bool? listeningFollow,
     bool? continuousReading,
     int? einkRefreshInterval,
+    bool? instantSwipeTurn,
+    bool? tapLeftTurnsNext,
   }) {
     return ReaderPreferences(
       fontSize: fontSize ?? this.fontSize,
@@ -166,6 +180,8 @@ class ReaderPreferences {
       continuousReading: continuousReading ?? this.continuousReading,
       einkRefreshInterval:
           einkRefreshInterval ?? this.einkRefreshInterval,
+      instantSwipeTurn: instantSwipeTurn ?? this.instantSwipeTurn,
+      tapLeftTurnsNext: tapLeftTurnsNext ?? this.tapLeftTurnsNext,
     ).normalized();
   }
 
@@ -204,6 +220,8 @@ class ReaderPreferences {
       listeningFollow: listeningFollow,
       continuousReading: continuousReading,
       einkRefreshInterval: einkRefreshInterval.clamp(0, 100),
+      instantSwipeTurn: instantSwipeTurn,
+      tapLeftTurnsNext: tapLeftTurnsNext,
     );
   }
 
@@ -259,6 +277,8 @@ class ReaderPreferences {
       continuousReading: _boolean(preferences, _continuousReadingKey) ?? true,
       einkRefreshInterval:
           (_number(preferences, _einkRefreshIntervalKey) ?? 10).round(),
+      instantSwipeTurn: _boolean(preferences, _instantSwipeTurnKey) ?? false,
+      tapLeftTurnsNext: _boolean(preferences, _tapLeftTurnsNextKey) ?? false,
     ).normalized();
   }
 
@@ -307,6 +327,8 @@ class ReaderPreferences {
         _einkRefreshIntervalKey,
         value.einkRefreshInterval,
       ),
+      preferences.setBool(_instantSwipeTurnKey, value.instantSwipeTurn),
+      preferences.setBool(_tapLeftTurnsNextKey, value.tapLeftTurnsNext),
     ]);
   }
 
