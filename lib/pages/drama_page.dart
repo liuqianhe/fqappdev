@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive_ce.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lottie/lottie.dart';
 
@@ -566,7 +566,9 @@ class _DramaPageState extends ConsumerState<DramaPage>
         _resumeInline();
         _scheduleInlineSync();
       }
-    } else {
+    } else if (state != AppLifecycleState.inactive) {
+      // `inactive` 只是瞬态打断（下拉通知栏/控制中心）：feed 继续播；
+      // 只有 hidden/paused/detached 才暂停（视频绝不能从后台出声）。
       // A video must never keep playing from the background.
       unawaited(_inline.pause());
     }

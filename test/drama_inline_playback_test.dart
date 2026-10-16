@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fqapp/models/media_item.dart';
@@ -254,6 +254,26 @@ void main() {
     );
     expect(find.byType(Texture), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  // P1-15：feed 内联播放的 inactive（通知栏/控制中心）继续播，hidden
+  // 暂停，resumed 恢复。参考 audio_page_test 的 lifecycle 循环写法。
+  testWidgets('inactive keeps the feed playing, hidden pauses it', (
+    tester,
+  ) async {
+    final session = _Session();
+    await _mount(tester, session);
+    final player = session.players.single;
+    expect(player.isPlaying, isTrue);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await _flush(tester);
+    expect(player.isPlaying, isTrue);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await _flush(tester);
+    expect(player.isPlaying, isFalse);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await _flush(tester);
+    expect(player.isPlaying, isTrue);
   });
 
   testWidgets('内联矩形按解码尺寸排布，横屏剧不按 9:16', (tester) async {
